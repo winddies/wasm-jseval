@@ -1,7 +1,7 @@
 <h1>Open your console</h1>
-<script src="../duktapeEval.js"></script>
+<script src="../run.js"></script>
 <script>
-	const testString = `
+  const testString = `
 var obj={}
 obj.a=7
 obj.b=8
@@ -17,9 +17,17 @@ for(var k in obj){
 	}
 }
 sum
-`
-	duktapeEval.getInstance().then(mod => {
-		console.log('eval: ', eval(testString))
-		console.log('duktape-eval: ', mod.eval(testString))
-	})
+`;
+  //   quickjsEval()
+  //     .then((mod) => {
+  //       const expr = mod.cwrap("eval", "string", ["string"]);
+
+  //       const result = expr("1+1");
+  //       console.log("result:", result);
+  //       // const add = mod.newFunction(["a", "b"], "return a+b");
+  //       // console.log(add(1, 2)); // 3
+  //     })
+  //     .catch((err) => {
+  //       console.log("err", err);
+  //     });
 </script>

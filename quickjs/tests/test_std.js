@@ -1,3 +1,4 @@
+#! (shebang test)
 import * as std from "std";
 import * as os from "os";
 
@@ -26,6 +27,12 @@ try { std.loadScript("test_assert.js"); } catch(e) {}
 function test_printf()
 {
     assert(std.sprintf("a=%d s=%s", 123, "abc"), "a=123 s=abc");
+    assert(std.sprintf("%010d", 123), "0000000123");
+    assert(std.sprintf("%x", -2), "fffffffe");
+    assert(std.sprintf("%lx", -2), "fffffffffffffffe");
+    assert(std.sprintf("%10.1f", 2.1), "       2.1");
+    assert(std.sprintf("%*.*f", 10, 2, -2.13), "     -2.13");
+    assert(std.sprintf("%#lx", 0x7fffffffffffffffn), "0x7fffffffffffffff");
 }
 
 function test_file1()
@@ -39,7 +46,7 @@ function test_file1()
     f.seek(0, std.SEEK_SET);
     str1 = f.readAsString();
     assert(str1 === str);
-    
+
     f.seek(0, std.SEEK_END);
     size = f.tell();
     assert(size === str.length);
@@ -74,7 +81,7 @@ function test_file2()
 function test_getline()
 {
     var f, line, line_count, lines, i;
-    
+
     lines = ["hello world", "line 1", "line 2" ];
     f = std.tmpfile();
     for(i = 0; i < lines.length; i++) {
@@ -96,7 +103,7 @@ function test_getline()
 
     f.close();
 }
- 
+
 function test_popen()
 {
     var str, f, fname = "tmp_file.txt";
@@ -105,6 +112,9 @@ function test_popen()
     f = std.open(fname, "w");
     f.puts(content);
     f.close();
+
+    /* test loadFile */
+    assert(std.loadFile(fname), content);
 
     /* execute the 'cat' shell command */
     f = std.popen("cat " + fname, "r");
@@ -116,39 +126,61 @@ function test_popen()
     os.remove(fname);
 }
 
+function test_ext_json()
+{
+    var expected, input, obj;
+    expected = '{"x":false,"y":true,"z2":null,"a":[1,8,160],"s":"str"}';
+    input = `{ "x":false, /*comments are allowed */
+               "y":true,  // also a comment
+               z2:null, // unquoted property names
+               "a":[+1,0o10,0xa0,], // plus prefix, octal, hexadecimal
+               "s":"str",} // trailing comma in objects and arrays
+            `;
+    obj = std.parseExtJSON(input);
+    assert(JSON.stringify(obj), expected);
+}
+
 function test_os()
 {
     var fd, fpath, fname, fdir, buf, buf2, i, files, err, fdate, st, link_path;
 
-    assert(os.isatty(0));
+    const stdinIsTTY = !os.exec(["/bin/sh", "-c", "test -t 0"], { usePath: false });
+
+    assert(os.isatty(0), stdinIsTTY, `isatty(STDIN)`);
 
     fdir = "test_tmp_dir";
     fname = "tmp_file.txt";
     fpath = fdir + "/" + fname;
     link_path = fdir + "/test_link";
-    
+
     os.remove(link_path);
     os.remove(fpath);
     os.remove(fdir);
 
     err = os.mkdir(fdir, 0o755);
     assert(err === 0);
-    
+
     fd = os.open(fpath, os.O_RDWR | os.O_CREAT | os.O_TRUNC);
     assert(fd >= 0);
-    
+
     buf = new Uint8Array(10);
     for(i = 0; i < buf.length; i++)
         buf[i] = i;
     assert(os.write(fd, buf.buffer, 0, buf.length) === buf.length);
 
-    assert(os.seek(fd, 0, os.SEEK_SET) === 0);
+    assert(os.seek(fd, 0, std.SEEK_SET) === 0);
     buf2 = new Uint8Array(buf.length);
     assert(os.read(fd, buf2.buffer, 0, buf2.length) === buf2.length);
-    
+
     for(i = 0; i < buf.length; i++)
         assert(buf[i] == buf2[i]);
-    
+
+    if (typeof BigInt !== "undefined") {
+        assert(os.seek(fd, BigInt(6), std.SEEK_SET), BigInt(6));
+        assert(os.read(fd, buf2.buffer, 0, 1) === 1);
+        assert(buf[6] == buf2[0]);
+    }
+
     assert(os.close(fd) === 0);
 
     [files, err] = os.readdir(fdir);
@@ -159,7 +191,7 @@ function test_os()
 
     err = os.utimes(fpath, fdate, fdate);
     assert(err, 0);
-    
+
     [st, err] = os.stat(fpath);
     assert(err, 0);
     assert(st.mode & os.S_IFMT, os.S_IFREG);
@@ -167,7 +199,7 @@ function test_os()
 
     err = os.symlink(fname, link_path);
     assert(err === 0);
-    
+
     [st, err] = os.lstat(link_path);
     assert(err, 0);
     assert(st.mode & os.S_IFMT, os.S_IFLNK);
@@ -175,7 +207,7 @@ function test_os()
     [buf, err] = os.readlink(link_path);
     assert(err, 0);
     assert(buf, fname);
-    
+
     assert(os.remove(link_path) === 0);
 
     [buf, err] = os.getcwd();
@@ -185,7 +217,7 @@ function test_os()
     assert(err, 0);
 
     assert(buf, buf2);
-    
+
     assert(os.remove(fpath) === 0);
 
     fd = os.open(fpath, os.O_RDONLY);
@@ -203,9 +235,13 @@ function test_os_exec()
 
     ret = os.exec(["/bin/sh", "-c", "exit 1"], { usePath: false });
     assert(ret, 1);
-    
+
     fds = os.pipe();
-    pid = os.exec(["echo", "hello"], { stdout: fds[1], block: false } );
+    pid = os.exec(["sh", "-c", "echo $FOO"], {
+        stdout: fds[1],
+        block: false,
+        env: { FOO: "hello" },
+    } );
     assert(pid >= 0);
     os.close(fds[1]); /* close the write end (as it is only in the child)  */
     f = std.fdopen(fds[0], "r");
@@ -219,10 +255,11 @@ function test_os_exec()
 
     pid = os.exec(["cat"], { block: false } );
     assert(pid >= 0);
-    os.kill(pid, os.SIGQUIT);
+    os.kill(pid, os.SIGTERM);
     [ret, status] = os.waitpid(pid, 0);
     assert(ret, pid);
-    assert(status & 0x7f, os.SIGQUIT);
+    assert(status !== 0, true, `expect nonzero exit code (got ${status})`);
+    assert(status & 0x7f, os.SIGTERM);
 }
 
 function test_timer()
@@ -237,6 +274,26 @@ function test_timer()
         os.clearTimeout(th[i]);
 }
 
+/* test closure variable handling when freeing asynchronous
+   function */
+function test_async_gc()
+{
+    (async function run () {
+        let obj = {}
+
+        let done = () => {
+            obj
+            std.gc();
+        }
+
+        Promise.resolve().then(done)
+
+        const p = new Promise(() => {})
+
+        await p
+    })();
+}
+
 test_printf();
 test_file1();
 test_file2();
@@ -245,3 +302,6 @@ test_popen();
 test_os();
 test_os_exec();
 test_timer();
+test_ext_json();
+test_async_gc();
+
